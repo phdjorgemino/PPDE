@@ -191,9 +191,48 @@ python3 --version          # ≥ 3.10
 ### 4.3 Entorno Python aislado
 
 ```bash
-mkdir -p ~/lab1 && cd ~/lab1
+# =========================
+# 0. Crear y entrar al proyecto
+# =========================
+
+mkdir -p ~/lab1
+cd ~/lab1
+
+
+# =========================
+# 1. Dependencias del sistema
+# =========================
+
+apt update
+
+apt install -y \
+  python3 \
+  python3-venv \
+  python3-pip \
+  python-is-python3 \
+  build-essential \
+  libmagic1 \
+  libmagic-dev
+
+
+# =========================
+# 2. Crear entorno virtual
+# =========================
+
 python3 -m venv .venv
 source .venv/bin/activate
+
+
+# =========================
+# 3. Actualizar herramientas base de Python
+# =========================
+
+python -m pip install --upgrade pip setuptools wheel
+
+
+# =========================
+# 4. Crear requirements.txt
+# =========================
 
 cat > requirements.txt <<'EOF'
 presidio-analyzer==2.2.355
@@ -211,12 +250,58 @@ faker==26.0.0
 cryptography==43.0.0
 hvac==2.3.0
 minio==7.2.7
+click==8.1.7
+pyarrow==17.0.0
 EOF
 
-pip install --upgrade pip wheel
-pip install -r requirements.txt
+
+# =========================
+# 5. Instalar dependencias Python
+# =========================
+
+python -m pip install -r requirements.txt
+
+
+# =========================
+# 6. Descargar modelos de spaCy
+# =========================
+
 python -m spacy download es_core_news_lg
 python -m spacy download en_core_web_lg
+
+
+# =========================
+# 7. Verificar instalación
+# =========================
+
+python - <<'PY'
+import torch
+import spacy
+import pandas
+import faker
+import presidio_analyzer
+import presidio_anonymizer
+
+print("Torch:", torch.__version__)
+print("CUDA disponible:", torch.cuda.is_available())
+print("spaCy:", spacy.__version__)
+print("Pandas:", pandas.__version__)
+print("Entorno listo.")
+PY
+
+
+# =========================
+# 8. Ejecutar generación de corpus
+# =========================
+# Esto asume que existe el archivo:
+# ~/lab1/scripts/gen_corpus.py
+
+if [ -f scripts/gen_corpus.py ]; then
+    python scripts/gen_corpus.py
+else
+    echo "[ADVERTENCIA] No existe scripts/gen_corpus.py"
+    echo "Crea o copia el archivo en: ~/lab1/scripts/gen_corpus.py"
+fi
 ```
 
 ### 4.4 Instalación de age (cifrado)
