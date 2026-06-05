@@ -296,7 +296,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: lab1admin
-      MINIO_ROOT_PASSWORD: Lopdp2025!Secure
+      MINIO_ROOT_PASSWORD: Lopdp2026
       # NOTA: NO usar MINIO_DEFAULT_BUCKETS — los buckets se crean manualmente
       # en A.4 porque Object Lock requiere `mc mb --with-lock` al momento de la
       # creación y no puede habilitarse retroactivamente.
