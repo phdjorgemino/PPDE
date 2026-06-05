@@ -2725,7 +2725,7 @@ cat reports/RAT.json | jq
 
 
 
-## 16. RÚBRICA DE EVALUACIÓN
+## 15. RÚBRICA DE EVALUACIÓN
 
 | Criterio | Excelente (90-100) | Aceptable (70-89) | Insuficiente (<70) | Peso |
 |----------|--------------------|--------------------|---------------------|------|
@@ -2740,7 +2740,7 @@ cat reports/RAT.json | jq
 
 ---
 
-## 17. REFERENCIAS NORMATIVAS Y TÉCNICAS
+## 16. REFERENCIAS NORMATIVAS Y TÉCNICAS
 
 ### Normativa
 
