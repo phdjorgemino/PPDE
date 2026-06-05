@@ -1786,109 +1786,318 @@ Crea `~/lab1/scripts/train_dp.py`:
 #!/usr/bin/env python3
 """
 Entrenamiento DP-SGD de clasificador BERT-Spanish sobre corpus sanitizado.
-Garantía formal: (ε, δ)-DP con ε ≤ 3, δ = 1e-5.
+Garantía formal: (ε, δ)-DP con ε objetivo ≤ 3, δ = 1e-5.
 """
-import json, time
+
+import json
+import time
 from pathlib import Path
-import pandas as pd, torch
+
+import pandas as pd
+import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from opacus import PrivacyEngine
 from opacus.utils.batch_memory_manager import BatchMemoryManager
 
+
 BASE = Path(__file__).parent.parent
+
 MODEL_NAME = "dccuchile/bert-base-spanish-wwm-cased"
 MAX_LEN = 256
-BATCH = 8                # físico
-LOGICAL_BATCH = 64       # lógico (acumulación)
+
+# Batch físico: tamaño real que entra en la GPU
+BATCH = 8
+
+# Batch lógico: tamaño usado para el cálculo DP
+LOGICAL_BATCH = 64
+
 EPOCHS = 3
 LR = 5e-5
+
 TARGET_EPS = 3.0
 TARGET_DELTA = 1e-5
 MAX_GRAD_NORM = 1.0
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-label_map = json.loads((BASE/"data"/"label_map.json").read_text())
+
+# =========================
+# Tokenizador y etiquetas
+# =========================
+
+tokenizer = AutoTokenizer.from_pretrained(
+    MODEL_NAME,
+    clean_up_tokenization_spaces=True
+)
+
+label_map_path = BASE / "data" / "label_map.json"
+
+if not label_map_path.exists():
+    raise FileNotFoundError(
+        f"No existe {label_map_path}. Debes generar label_map.json antes de entrenar."
+    )
+
+label_map = json.loads(label_map_path.read_text(encoding="utf-8"))
 NUM_LABELS = len(label_map)
+
+print(f"Número de clases: {NUM_LABELS}")
+print(f"Label map: {label_map}")
+
+
+# =========================
+# Dataset
+# =========================
 
 class ClinicalDataset(Dataset):
     def __init__(self, parquet_path):
+        parquet_path = Path(parquet_path)
+
+        if not parquet_path.exists():
+            raise FileNotFoundError(f"No existe el archivo: {parquet_path}")
+
         self.df = pd.read_parquet(parquet_path).reset_index(drop=True)
-    def __len__(self): return len(self.df)
+
+        required_cols = {"text", "label_id"}
+        missing = required_cols - set(self.df.columns)
+
+        if missing:
+            raise ValueError(
+                f"El archivo {parquet_path} no contiene las columnas requeridas: {missing}"
+            )
+
+    def __len__(self):
+        return len(self.df)
+
     def __getitem__(self, i):
         row = self.df.iloc[i]
-        enc = tokenizer(row["text"], truncation=True, padding="max_length",
-                        max_length=MAX_LEN, return_tensors="pt")
-        return {"input_ids": enc["input_ids"].squeeze(0),
-                "attention_mask": enc["attention_mask"].squeeze(0),
-                "labels": torch.tensor(int(row["label_id"]))}
 
-train_ds = ClinicalDataset(BASE/"data"/"train.parquet")
-test_ds  = ClinicalDataset(BASE/"data"/"test.parquet")
-train_loader = DataLoader(train_ds, batch_size=BATCH, shuffle=True)
-test_loader  = DataLoader(test_ds, batch_size=BATCH)
+        enc = tokenizer(
+            str(row["text"]),
+            truncation=True,
+            padding="max_length",
+            max_length=MAX_LEN,
+            return_tensors="pt"
+        )
+
+        input_ids = enc["input_ids"].squeeze(0)
+        attention_mask = enc["attention_mask"].squeeze(0)
+
+        if "token_type_ids" in enc:
+            token_type_ids = enc["token_type_ids"].squeeze(0)
+        else:
+            token_type_ids = torch.zeros(MAX_LEN, dtype=torch.long)
+
+        # CRÍTICO PARA OPACUS:
+        # Evita que BERT genere position_ids internos con forma [1, seq_len].
+        position_ids = torch.arange(MAX_LEN, dtype=torch.long)
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "token_type_ids": token_type_ids,
+            "position_ids": position_ids,
+            "labels": torch.tensor(int(row["label_id"]), dtype=torch.long)
+        }
+
+
+train_ds = ClinicalDataset(BASE / "data" / "train.parquet")
+test_ds = ClinicalDataset(BASE / "data" / "test.parquet")
+
+print(f"Train samples: {len(train_ds)}")
+print(f"Test samples:  {len(test_ds)}")
+
+
+train_loader = DataLoader(
+    train_ds,
+    batch_size=LOGICAL_BATCH,
+    shuffle=True,
+    drop_last=False
+)
+
+test_loader = DataLoader(
+    test_ds,
+    batch_size=BATCH,
+    shuffle=False
+)
+
+
+# =========================
+# Modelo
+# =========================
 
 model = AutoModelForSequenceClassification.from_pretrained(
-    MODEL_NAME, num_labels=NUM_LABELS).to(device)
-
-# Opacus exige que los parámetros requieran gradiente
-optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9)
-
-privacy_engine = PrivacyEngine()
-model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
-    module=model, optimizer=optimizer, data_loader=train_loader,
-    target_epsilon=TARGET_EPS, target_delta=TARGET_DELTA,
-    epochs=EPOCHS, max_grad_norm=MAX_GRAD_NORM,
+    MODEL_NAME,
+    num_labels=NUM_LABELS
 )
+
+model.to(device)
+model.train()
+
+
+# =========================
+# Optimizador
+# =========================
+
+optimizer = torch.optim.SGD(
+    model.parameters(),
+    lr=LR,
+    momentum=0.9
+)
+
+
+# =========================
+# Privacy Engine
+# =========================
+
+privacy_engine = PrivacyEngine(
+    accountant="rdp",
+    secure_mode=False
+)
+
+model, optimizer, train_loader = privacy_engine.make_private_with_epsilon(
+    module=model,
+    optimizer=optimizer,
+    data_loader=train_loader,
+    target_epsilon=TARGET_EPS,
+    target_delta=TARGET_DELTA,
+    epochs=EPOCHS,
+    max_grad_norm=MAX_GRAD_NORM,
+)
+
 print(f"Noise multiplier: {optimizer.noise_multiplier:.4f}")
+
+
+# =========================
+# Evaluación
+# =========================
 
 def evaluate(loader):
     model.eval()
-    correct, total = 0, 0
+
+    correct = 0
+    total = 0
+
     with torch.no_grad():
         for batch in loader:
             ids = batch["input_ids"].to(device)
             mask = batch["attention_mask"].to(device)
+            token_type_ids = batch["token_type_ids"].to(device)
+            position_ids = batch["position_ids"].to(device)
             y = batch["labels"].to(device)
-            out = model(input_ids=ids, attention_mask=mask)
-            pred = out.logits.argmax(-1)
+
+            out = model(
+                input_ids=ids,
+                attention_mask=mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids
+            )
+
+            pred = out.logits.argmax(dim=-1)
+
             correct += (pred == y).sum().item()
             total += y.size(0)
+
+    model.train()
+
+    if total == 0:
+        return 0.0
+
     return correct / total
 
+
+# =========================
+# Entrenamiento
+# =========================
+
 start = time.time()
+
 for epoch in range(EPOCHS):
     model.train()
+
     epoch_loss = 0.0
-    with BatchMemoryManager(data_loader=train_loader,
-                            max_physical_batch_size=BATCH,
-                            optimizer=optimizer) as mloader:
-        for step, batch in enumerate(mloader):
-            optimizer.zero_grad()
-            out = model(input_ids=batch["input_ids"].to(device),
-                        attention_mask=batch["attention_mask"].to(device),
-                        labels=batch["labels"].to(device))
-            out.loss.backward()
+    steps = 0
+
+    with BatchMemoryManager(
+        data_loader=train_loader,
+        max_physical_batch_size=BATCH,
+        optimizer=optimizer
+    ) as memory_safe_data_loader:
+
+        for step, batch in enumerate(memory_safe_data_loader):
+            optimizer.zero_grad(set_to_none=True)
+
+            ids = batch["input_ids"].to(device)
+            mask = batch["attention_mask"].to(device)
+            token_type_ids = batch["token_type_ids"].to(device)
+            position_ids = batch["position_ids"].to(device)
+            y = batch["labels"].to(device)
+
+            out = model(
+                input_ids=ids,
+                attention_mask=mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                labels=y
+            )
+
+            loss = out.loss
+            loss.backward()
             optimizer.step()
-            epoch_loss += out.loss.item()
+
+            epoch_loss += loss.item()
+            steps += 1
+
             if step % 20 == 0:
                 eps = privacy_engine.get_epsilon(TARGET_DELTA)
-                print(f"  epoch {epoch+1} step {step} loss={out.loss.item():.4f} ε={eps:.3f}")
+                print(
+                    f"epoch={epoch + 1} "
+                    f"step={step} "
+                    f"loss={loss.item():.4f} "
+                    f"epsilon={eps:.3f}"
+                )
 
+    avg_loss = epoch_loss / max(steps, 1)
     acc = evaluate(test_loader)
     eps = privacy_engine.get_epsilon(TARGET_DELTA)
-    print(f"== epoch {epoch+1}: test_acc={acc:.4f}, ε={eps:.3f} ==")
 
-print(f"Tiempo total: {(time.time()-start)/60:.1f} min")
-print(f"ε final certificado: {privacy_engine.get_epsilon(TARGET_DELTA):.4f}")
+    print(
+        f"== epoch {epoch + 1}: "
+        f"avg_loss={avg_loss:.4f}, "
+        f"test_acc={acc:.4f}, "
+        f"epsilon={eps:.3f} =="
+    )
+
+
+# =========================
+# Resultados finales
+# =========================
+
+elapsed = (time.time() - start) / 60
+final_eps = privacy_engine.get_epsilon(TARGET_DELTA)
+
+print(f"Tiempo total: {elapsed:.1f} min")
+print(f"ε final certificado: {final_eps:.4f}")
 print(f"δ:                   {TARGET_DELTA}")
 
-# Guardar modelo (sin envoltura DP)
-torch.save(model._module.state_dict(), BASE/"models"/"clinico_dp.pt")
-print("Modelo guardado.")
+
+# =========================
+# Guardar modelo
+# =========================
+
+models_dir = BASE / "models"
+models_dir.mkdir(parents=True, exist_ok=True)
+
+raw_model = model._module if hasattr(model, "_module") else model
+
+torch.save(
+    raw_model.state_dict(),
+    models_dir / "clinico_dp.pt"
+)
+
+print(f"Modelo guardado en: {models_dir / 'clinico_dp.pt'}")
 ```
 
 ### F.3 Baseline no privado para comparación
