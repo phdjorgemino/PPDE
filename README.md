@@ -68,7 +68,7 @@ Interpretación operacional: ε pequeño implica que la salida del mecanismo es 
 
 ### 2.1 Contexto institucional ficticio
 
-El **Entidad de Salud** opera 23 hospitales regionales que producen, en conjunto, ~240,000 documentos anuales: oficios internos, historiales clínicos digitalizados (CDA-XML), reportes de laboratorio, recetas, autorizaciones quirúrgicas. La Subsecretaría Nacional de Vigilancia de la Salud requiere construir un clasificador automatizado de tópicos clínicos que enrute los expedientes hacia las unidades especializadas correctas (cardiología, oncología, ginecobstetricia, etc.), reduciendo tiempos de gestión administrativa.
+La **Entidad de Salud** opera 23 hospitales regionales que producen, en conjunto, ~240,000 documentos anuales: oficios internos, historiales clínicos digitalizados (CDA-XML), reportes de laboratorio, recetas, autorizaciones quirúrgicas. La Subsecretaría Nacional de Vigilancia de la Salud requiere construir un clasificador automatizado de tópicos clínicos que enrute los expedientes hacia las unidades especializadas correctas (cardiología, oncología, ginecobstetricia, etc.), reduciendo tiempos de gestión administrativa.
 
 ### 2.2 Modelo de amenazas (STRIDE simplificado)
 
@@ -2662,7 +2662,7 @@ out = {
     "identificativos": ["nombre", "cédula", "domicilio", "teléfono", "correo"],
     "sensibles": ["diagnóstico", "medicación", "antecedentes clínicos"]
   },
-  "destinatarios": ["Subsecretaría Nacional de Vigilancia de la Salud"],
+  "destinatarios": ["Entidad de Vigilancia de la Salud"],
   "transferencias_internacionales": "ninguna",
   "plazo_conservacion": "5 años desde el último acceso administrativo",
   "medidas_tecnicas": [
