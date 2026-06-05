@@ -1,9 +1,8 @@
 # LABORATORIO
 ## Sanitización, Privacidad Diferencial y Cifrado Híbrido de Corpus Documental bajo LOPDP-EC
 
-**Programa:** Maestría / Doctorado en Ciberseguridad Avanzada
-**Duración estimada:** 16 horas académicas (4 sesiones de 4 h)
-**Modalidad:** Laboratorio práctico individual con defensa oral
+
+**Modalidad:** Laboratorio práctico individual 
 **Prerrequisito teórico:** Criptografía aplicada, fundamentos de ML, derecho digital
 
 ---
@@ -2788,13 +2787,4 @@ cat reports/RAT.json | jq
 - Hugging Face Transformers — Documentación: `https://huggingface.co/docs/transformers`
 - BETO (BERT en español, U. de Chile) — Modelo: `https://huggingface.co/dccuchile/bert-base-spanish-wwm-cased`
 
-### Literatura formal indexada (selección)
-
-- Dwork, C.; Roth, A. *The Algorithmic Foundations of Differential Privacy*. Foundations and Trends in Theoretical Computer Science, Vol. 9, Nos. 3–4, 2014.
-- Abadi, M. et al. *Deep Learning with Differential Privacy*. Proceedings of the 23rd ACM Conference on Computer and Communications Security (CCS), 2016.
-- Mironov, I. *Rényi Differential Privacy*. Proceedings of the 30th IEEE Computer Security Foundations Symposium (CSF), 2017.
-- Shokri, R.; Stronati, M.; Song, C.; Shmatikov, V. *Membership Inference Attacks against Machine Learning Models*. Proceedings of the IEEE Symposium on Security and Privacy (S&P), 2017.
-- Sweeney, L. *k-anonymity: a model for protecting privacy*. International Journal on Uncertainty, Fuzziness and Knowledge-based Systems, 10(5), 2002.
-
----
 
