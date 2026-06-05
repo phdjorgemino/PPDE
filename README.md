@@ -1157,102 +1157,279 @@ Crea `~/lab1/scripts/sanitize.py`:
 #!/usr/bin/env python3
 """
 Pipeline de sanitización:
-  raw-corpus → Tika → Presidio → Anonymizer → sanitized-corpus
+  raw-corpus → Presidio Analyzer → Presidio Anonymizer → sanitized-corpus
 """
-import sys, json, hashlib, hmac, os
+
+import sys
+import json
+import hashlib
+import hmac
+import os
 from pathlib import Path
 from datetime import datetime
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "recognizers"))
+from collections import Counter
 
 from presidio_analyzer import AnalyzerEngine
+from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
+
+# Permite importar reconocedores personalizados
+sys.path.insert(0, str(Path(__file__).parent.parent / "recognizers"))
+
 from ec_cedula import EcuadorCedulaRecognizer
 from ec_ruc import EcuadorRucRecognizer
 from ec_phone import EcuadorPhoneRecognizer
-from extractor import extract_text
 
-# Sal HMAC por instalación; en producción → Vault Transit
-INSTALL_SECRET = os.environ.get("LAB1_HMAC_SECRET", "lab1-msp-default-secret")
+
+# ============================================================
+# Configuración general
+# ============================================================
+
+INSTALL_SECRET = os.environ.get(
+    "LAB1_HMAC_SECRET",
+    "lab1-msp-default-secret"
+)
+
+SPACY_ES_MODEL = os.environ.get(
+    "PRESIDIO_ES_MODEL",
+    "es_core_news_sm"
+)
+
+ENTITIES = [
+    "PERSON",
+    "LOCATION",
+    "EMAIL_ADDRESS",
+    "EC_CEDULA",
+    "EC_RUC",
+    "EC_PHONE"
+]
+
+
+# ============================================================
+# Seudonimización determinística
+# ============================================================
 
 def stable_token(value: str, entity_type: str) -> str:
-    """Token seudónimo determinístico (mismo valor → mismo token)."""
-    h = hmac.new(INSTALL_SECRET.encode(),
-                 f"{entity_type}|{value}".encode(),
-                 hashlib.sha256).hexdigest()
+    """
+    Genera un token seudónimo determinístico.
+    El mismo valor produce el mismo token para una misma instalación.
+    """
+    h = hmac.new(
+        INSTALL_SECRET.encode("utf-8"),
+        f"{entity_type}|{value}".encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+
     return f"<{entity_type}_{h[:10]}>"
 
-# --- Construir analyzer ---
-analyzer = AnalyzerEngine(supported_languages=["es"])
-analyzer.registry.add_recognizer(EcuadorCedulaRecognizer())
-analyzer.registry.add_recognizer(EcuadorRucRecognizer())
-analyzer.registry.add_recognizer(EcuadorPhoneRecognizer())
 
-ENTITIES = ["PERSON", "LOCATION", "EMAIL_ADDRESS",
-            "EC_CEDULA", "EC_RUC", "EC_PHONE"]
+# ============================================================
+# Construcción explícita del motor NLP en español
+# ============================================================
 
-# --- Matriz de tratamiento (operadores Presidio) ---
-def build_operators():
-    return {
-        "PERSON":        OperatorConfig("custom", {"lambda": lambda v: stable_token(v, "PERSONA")}),
-        "EC_CEDULA":     OperatorConfig("custom", {"lambda": lambda v: stable_token(v, "CED")}),
-        "EC_RUC":        OperatorConfig("custom", {"lambda": lambda v: stable_token(v, "RUC")}),
-        "EC_PHONE":      OperatorConfig("mask",   {"masking_char":"*","chars_to_mask":7,"from_end":True}),
-        "EMAIL_ADDRESS": OperatorConfig("replace",{"new_value":"<EMAIL>"}),
-        "LOCATION":      OperatorConfig("replace",{"new_value":"<UBICACION>"}),
+def build_analyzer() -> AnalyzerEngine:
+    """
+    Crea un AnalyzerEngine de Presidio usando explícitamente spaCy en español.
+    Esto evita el error KeyError: 'es'.
+    """
+
+    nlp_configuration = {
+        "nlp_engine_name": "spacy",
+        "models": [
+            {
+                "lang_code": "es",
+                "model_name": SPACY_ES_MODEL
+            }
+        ]
     }
 
+    provider = NlpEngineProvider(nlp_configuration=nlp_configuration)
+    nlp_engine = provider.create_engine()
+
+    # Ajuste preventivo para documentos extensos
+    if hasattr(nlp_engine, "nlp"):
+        for _, nlp_model in nlp_engine.nlp.items():
+            nlp_model.max_length = max(nlp_model.max_length, 2_000_000)
+
+    analyzer_engine = AnalyzerEngine(
+        nlp_engine=nlp_engine,
+        supported_languages=["es"]
+    )
+
+    analyzer_engine.registry.add_recognizer(EcuadorCedulaRecognizer())
+    analyzer_engine.registry.add_recognizer(EcuadorRucRecognizer())
+    analyzer_engine.registry.add_recognizer(EcuadorPhoneRecognizer())
+
+    return analyzer_engine
+
+
+analyzer = build_analyzer()
 anonymizer = AnonymizerEngine()
 
-def sanitize_text(text: str) -> tuple[str, list]:
-    results = analyzer.analyze(text=text, language="es", entities=ENTITIES)
-    # Filtrar: las cédulas detectadas ya pasaron checksum por validate_result;
-    # las EC_PHONE pueden traer falsos positivos: requerir score mínimo
-    results = [r for r in results if r.score >= 0.4]
-    anon = anonymizer.anonymize(text=text, analyzer_results=results,
-                                 operators=build_operators())
-    audit = [{"entity": r.entity_type, "start": r.start,
-              "end": r.end, "score": round(r.score,3)} for r in results]
-    return anon.text, audit
 
+# ============================================================
+# Operadores de anonimización
+# ============================================================
+
+def build_operators():
+    return {
+        "PERSON": OperatorConfig(
+            "custom",
+            {
+                "lambda": lambda value: stable_token(value, "PERSONA")
+            }
+        ),
+
+        "EC_CEDULA": OperatorConfig(
+            "custom",
+            {
+                "lambda": lambda value: stable_token(value, "CED")
+            }
+        ),
+
+        "EC_RUC": OperatorConfig(
+            "custom",
+            {
+                "lambda": lambda value: stable_token(value, "RUC")
+            }
+        ),
+
+        "EC_PHONE": OperatorConfig(
+            "mask",
+            {
+                "masking_char": "*",
+                "chars_to_mask": 7,
+                "from_end": True
+            }
+        ),
+
+        "EMAIL_ADDRESS": OperatorConfig(
+            "replace",
+            {
+                "new_value": "<EMAIL>"
+            }
+        ),
+
+        "LOCATION": OperatorConfig(
+            "replace",
+            {
+                "new_value": "<UBICACION>"
+            }
+        ),
+    }
+
+
+# ============================================================
+# Sanitización de texto
+# ============================================================
+
+def sanitize_text(text: str) -> tuple[str, list]:
+    if not text or not text.strip():
+        return "", []
+
+    results = analyzer.analyze(
+        text=text,
+        language="es",
+        entities=ENTITIES
+    )
+
+    # Umbral mínimo para reducir falsos positivos
+    results = [
+        r for r in results
+        if r.score >= 0.4
+    ]
+
+    anonymized = anonymizer.anonymize(
+        text=text,
+        analyzer_results=results,
+        operators=build_operators()
+    )
+
+    audit = [
+        {
+            "entity": r.entity_type,
+            "start": r.start,
+            "end": r.end,
+            "score": round(r.score, 3)
+        }
+        for r in results
+    ]
+
+    return anonymized.text, audit
+
+
+def _count_by_type(entities: list) -> dict:
+    return dict(Counter(e["entity"] for e in entities))
+
+
+# ============================================================
+# Procesamiento del corpus
+# ============================================================
 
 def process_corpus(input_dir: Path, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
+
     audit_log = []
-    files = sorted([p for p in input_dir.glob("oficio_*.txt")])
+
+    files = sorted(input_dir.glob("oficio_*.txt"))
+
     print(f"Procesando {len(files)} documentos...")
 
-    for i, p in enumerate(files):
-        text = p.read_text(encoding="utf-8")
-        sanitized, entities = sanitize_text(text)
-        out_path = output_dir / p.name
-        out_path.write_text(sanitized, encoding="utf-8")
-        audit_log.append({
-            "file": p.name,
-            "input_chars": len(text),
-            "output_chars": len(sanitized),
-            "entities_found": len(entities),
-            "by_type": _count_by_type(entities),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        })
-        if (i+1) % 50 == 0:
-            print(f"  [{i+1}/{len(files)}] procesados")
+    for i, path in enumerate(files, start=1):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+
+            sanitized, entities = sanitize_text(text)
+
+            out_path = output_dir / path.name
+            out_path.write_text(
+                sanitized,
+                encoding="utf-8"
+            )
+
+            audit_log.append({
+                "file": path.name,
+                "input_chars": len(text),
+                "output_chars": len(sanitized),
+                "entities_found": len(entities),
+                "by_type": _count_by_type(entities),
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            })
+
+            if i % 50 == 0:
+                print(f"  [{i}/{len(files)}] procesados")
+
+        except Exception as exc:
+            audit_log.append({
+                "file": path.name,
+                "error": str(exc),
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            })
+
+            print(f"ERROR procesando {path.name}: {exc}")
 
     audit_path = output_dir.parent / "logs" / "sanitize_audit.jsonl"
-    audit_path.parent.mkdir(exist_ok=True)
-    with open(audit_path, "w") as f:
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(audit_path, "w", encoding="utf-8") as f:
         for row in audit_log:
-            f.write(json.dumps(row) + "\n")
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
     print(f"Auditoría escrita en {audit_path}")
 
-def _count_by_type(entities):
-    from collections import Counter
-    return dict(Counter(e["entity"] for e in entities))
+
+# ============================================================
+# Main
+# ============================================================
 
 if __name__ == "__main__":
     base = Path(__file__).parent.parent
-    process_corpus(base / "data" / "corpus", base / "data" / "sanitized")
+
+    process_corpus(
+        base / "data" / "corpus",
+        base / "data" / "sanitized"
+    )
 ```
 
 ### E.2 Ejecutar el pipeline
@@ -1647,8 +1824,8 @@ cp keys/corpus_v2.sha256 ~/lab1/sede_b/
 
 En el destino:
 ```bash
-cd ~/lab1/sede_b
-sha256sum -c corpus_v2.sha256       # debe imprimir "OK"
+cd ~/lab1
+sha256sum -c sede_b/corpus_v2.sha256 
 ```
 
 ### H.3 mTLS para canal de replicación (opcional avanzado)
