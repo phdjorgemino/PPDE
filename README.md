@@ -1546,37 +1546,232 @@ Crea `~/lab1/scripts/prepare_dataset.py`:
 
 ```python
 #!/usr/bin/env python3
+"""
+Prepara dataset supervisado desde:
+  data/corpus/manifest.jsonl
+  data/sanitized/oficio_*.txt
+
+Genera:
+  data/train.parquet
+  data/test.parquet
+  data/label_map.json
+"""
+
 import json
-import pandas as pd
 from pathlib import Path
+from collections import Counter
+
+import pandas as pd
 from sklearn.model_selection import train_test_split
 
-base = Path(__file__).parent.parent
-sanitized = base / "data" / "sanitized"
-manifest = base / "data" / "corpus" / "manifest.jsonl"
 
-records = []
-with open(manifest) as f:
-    for line in f:
-        m = json.loads(line)
-        text = (sanitized / m["file"]).read_text(encoding="utf-8")
-        records.append({"text": text, "label": m["label"]})
+# ============================================================
+# Rutas base
+# ============================================================
 
-df = pd.DataFrame(records)
-LABEL2ID = {l:i for i,l in enumerate(sorted(df.label.unique()))}
-df["label_id"] = df.label.map(LABEL2ID)
-print("Distribución:")
-print(df.label.value_counts())
+BASE = Path(__file__).resolve().parent.parent
 
-train, test = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
-train.to_parquet(base/"data"/"train.parquet", index=False)
-test.to_parquet(base/"data"/"test.parquet", index=False)
+SANITIZED_DIR = BASE / "data" / "sanitized"
+MANIFEST_PATH = BASE / "data" / "corpus" / "manifest.jsonl"
 
-with open(base/"data"/"label_map.json","w") as f:
-    json.dump(LABEL2ID, f, indent=2)
+TRAIN_PATH = BASE / "data" / "train.parquet"
+TEST_PATH = BASE / "data" / "test.parquet"
+LABEL_MAP_PATH = BASE / "data" / "label_map.json"
 
-print(f"Train={len(train)}, Test={len(test)}")
-print(f"Labels: {LABEL2ID}")
+
+# ============================================================
+# Validaciones iniciales
+# ============================================================
+
+def validate_paths():
+    if not MANIFEST_PATH.exists():
+        raise FileNotFoundError(
+            f"No existe el manifest: {MANIFEST_PATH}"
+        )
+
+    if not SANITIZED_DIR.exists():
+        raise FileNotFoundError(
+            f"No existe el directorio sanitizado: {SANITIZED_DIR}"
+        )
+
+
+# ============================================================
+# Carga del manifest y textos sanitizados
+# ============================================================
+
+def load_records():
+    records = []
+    missing_files = []
+    invalid_rows = 0
+
+    with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            line = line.strip()
+
+            if not line:
+                continue
+
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                print(f"Fila JSON inválida en manifest, línea {line_number}")
+                invalid_rows += 1
+                continue
+
+            if "file" not in row or "label" not in row:
+                print(f"Fila sin campos file/label en línea {line_number}: {row}")
+                invalid_rows += 1
+                continue
+
+            file_name = row["file"]
+            label = row["label"]
+
+            text_path = SANITIZED_DIR / file_name
+
+            if not text_path.exists():
+                missing_files.append(file_name)
+                continue
+
+            text = text_path.read_text(
+                encoding="utf-8",
+                errors="replace"
+            ).strip()
+
+            if not text:
+                print(f"Archivo vacío ignorado: {file_name}")
+                continue
+
+            records.append({
+                "file": file_name,
+                "text": text,
+                "label": label
+            })
+
+    if missing_files:
+        print("\nArchivos referenciados en manifest pero no encontrados en data/sanitized:")
+        for name in missing_files[:20]:
+            print(f"  - {name}")
+
+        if len(missing_files) > 20:
+            print(f"  ... y {len(missing_files) - 20} más")
+
+    if invalid_rows:
+        print(f"\nFilas inválidas ignoradas: {invalid_rows}")
+
+    if not records:
+        raise RuntimeError(
+            "No se cargó ningún registro válido. Revisa manifest.jsonl y data/sanitized."
+        )
+
+    return records
+
+
+# ============================================================
+# Construcción del dataset
+# ============================================================
+
+def build_dataframe(records):
+    df = pd.DataFrame(records)
+
+    labels = sorted(df["label"].unique())
+    label2id = {
+        label: idx
+        for idx, label in enumerate(labels)
+    }
+
+    df["label_id"] = df["label"].map(label2id)
+
+    return df, label2id
+
+
+# ============================================================
+# División train/test
+# ============================================================
+
+def split_dataset(df):
+    label_counts = Counter(df["label"])
+
+    print("\nDistribución por etiqueta:")
+    print(df["label"].value_counts())
+
+    min_class_count = min(label_counts.values())
+
+    if len(df) < 2:
+        raise RuntimeError(
+            "El dataset tiene menos de 2 registros. No se puede dividir en train/test."
+        )
+
+    if min_class_count < 2:
+        print(
+            "\nAdvertencia: al menos una clase tiene menos de 2 muestras. "
+            "Se hará split sin estratificación."
+        )
+
+        train_df, test_df = train_test_split(
+            df,
+            test_size=0.2,
+            random_state=42,
+            shuffle=True
+        )
+    else:
+        train_df, test_df = train_test_split(
+            df,
+            test_size=0.2,
+            stratify=df["label"],
+            random_state=42,
+            shuffle=True
+        )
+
+    return train_df, test_df
+
+
+# ============================================================
+# Escritura de salidas
+# ============================================================
+
+def save_outputs(train_df, test_df, label2id):
+    TRAIN_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    train_df.to_parquet(TRAIN_PATH, index=False)
+    test_df.to_parquet(TEST_PATH, index=False)
+
+    with open(LABEL_MAP_PATH, "w", encoding="utf-8") as f:
+        json.dump(
+            label2id,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
+    print("\nArchivos generados:")
+    print(f"  Train:     {TRAIN_PATH}")
+    print(f"  Test:      {TEST_PATH}")
+    print(f"  Label map: {LABEL_MAP_PATH}")
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def main():
+    validate_paths()
+
+    records = load_records()
+    df, label2id = build_dataframe(records)
+
+    train_df, test_df = split_dataset(df)
+
+    save_outputs(train_df, test_df, label2id)
+
+    print("\nResumen:")
+    print(f"  Total registros: {len(df)}")
+    print(f"  Train: {len(train_df)}")
+    print(f"  Test:  {len(test_df)}")
+    print(f"  Labels: {label2id}")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ```bash
