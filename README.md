@@ -2723,23 +2723,7 @@ cat reports/RAT.json | jq
 
 ---
 
-## 15. EJERCICIOS AVANZADOS Y EXTENSIONES DOCTORALES
 
-### Nivel maestría
-
-1. **E1** — Implementar un operador Presidio personalizado `FPE` (Format-Preserving Encryption) usando FF3-1 sobre cédulas para que el token preserve la longitud y se pueda revertir con clave maestra.
-2. **E2** — Añadir un recognizer para historiales académicos del país (código SENESCYT).
-3. **E3** — Reemplazar SHA-256 por HMAC con clave rotada y demostrar la propiedad de unlinkability entre datasets sanitizados con sales distintas.
-
-### Nivel doctorado
-
-4. **E4** — Diseñar un experimento factorial 2×3 (con/sin DP) × (ε ∈ {1, 3, 8}) midiendo F1 y MIA-AUC; aplicar ANOVA para determinar significancia.
-5. **E5** — Sustituir DP-SGD por DP-Adam con corrección de momentos; comparar tasa de convergencia con análisis Rényi.
-6. **E6** — Integrar un módulo de *secure multi-party computation* (SMPC) usando librerías como `crypten` para que tres hospitales puedan entrenar conjuntamente sin compartir corpus en claro.
-7. **E7** — Probar adversarialmente el pipeline con documentos donde la PII está embebida en imágenes escaneadas (OCR-evasion) y proponer mitigaciones (Presidio Image Redactor + verificación cruzada).
-8. **E8** — Formalizar el modelo de amenazas con LINDDUN-GO y mapear cada hallazgo a un control NIST SP 800-53.
-
----
 
 ## 16. RÚBRICA DE EVALUACIÓN
 
