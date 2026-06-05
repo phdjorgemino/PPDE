@@ -2104,7 +2104,7 @@ print(f"Modelo guardado en: {models_dir / 'clinico_dp.pt'}")
 
 Crea una variante `~/lab1/scripts/train_baseline.py` idéntica pero sin `PrivacyEngine`, para medir la pérdida de utilidad atribuible a DP.
 
-Crea `~/lab1/scripts/train_dp.py`:
+Crea `~/lab1/scripts/train_baseline.py`:
 
 ```python
 #!/usr/bin/env python3
