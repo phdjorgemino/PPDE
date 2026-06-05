@@ -68,7 +68,7 @@ Interpretación operacional: ε pequeño implica que la salida del mecanismo es 
 
 ### 2.1 Contexto institucional ficticio
 
-El **Ministerio de Salud Pública del Ecuador (MSP)** opera 23 hospitales regionales que producen, en conjunto, ~240,000 documentos anuales: oficios internos, historiales clínicos digitalizados (CDA-XML), reportes de laboratorio, recetas, autorizaciones quirúrgicas. La Subsecretaría Nacional de Vigilancia de la Salud requiere construir un clasificador automatizado de tópicos clínicos que enrute los expedientes hacia las unidades especializadas correctas (cardiología, oncología, ginecobstetricia, etc.), reduciendo tiempos de gestión administrativa.
+El **Entidad de Salud** opera 23 hospitales regionales que producen, en conjunto, ~240,000 documentos anuales: oficios internos, historiales clínicos digitalizados (CDA-XML), reportes de laboratorio, recetas, autorizaciones quirúrgicas. La Subsecretaría Nacional de Vigilancia de la Salud requiere construir un clasificador automatizado de tópicos clínicos que enrute los expedientes hacia las unidades especializadas correctas (cardiología, oncología, ginecobstetricia, etc.), reduciendo tiempos de gestión administrativa.
 
 ### 2.2 Modelo de amenazas (STRIDE simplificado)
 
@@ -856,7 +856,7 @@ def documento_clinico(categoria, idx):
         "Hospital Teodoro Maldonado Carbo",
     ])
 
-    texto = f"""MINISTERIO DE SALUD PÚBLICA DEL ECUADOR
+    texto = f"""Entidad de Salud
 {hospital}
 
 OFICIO DE REFERENCIA No. MSP-{categoria.upper()}-{idx:06d}
@@ -2645,7 +2645,7 @@ out = {
   "version": "1.0",
   "fecha_emision": datetime.now(timezone.utc).isoformat(),
   "responsable_tratamiento": {
-    "denominacion": "Ministerio de Salud Pública del Ecuador",
+    "denominacion": "Entidad de Salud",
     "identificador_fiscal": "1768145480001",
     "delegado_proteccion_datos": "dpo@msp.gob.ec"
   },
