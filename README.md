@@ -23,9 +23,7 @@
 12. Módulo H — Replicación y verificación criptográfica
 13. Módulo I — Auditoría de fuga residual
 14. Troubleshooting consolidado
-15. Ejercicios avanzados y extensiones doctorales
-16. Rúbrica de evaluación
-17. Referencias normativas y técnicas
+16. Referencias normativas y técnicas
 
 ---
 
