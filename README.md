@@ -103,7 +103,7 @@ Al final del laboratorio, el estudiante debe poder demostrar:
 
 ```
                     ┌─────────────────────┐
-                    │  Subsecretaría MSP  │
+                    │  Entidad Salud      │
                     │  (Data Consumer)    │
                     └──────────▲──────────┘
                                │ modelos + corpus sanitizado
