@@ -166,7 +166,7 @@ Al final del laboratorio, el estudiante debe poder demostrar:
 - Disco: 40 GB libres en SSD.
 - GPU opcional: cualquier NVIDIA con ≥ 6 GB VRAM y CUDA 12 reduce el tiempo del módulo F de ~3 h a ~25 min.
 
-### 4.2 Software base (Ubuntu 22.04 / 24.04 LTS)
+### 4.2 Software base (Ubuntu 22.04 / 24.04 LTS) (wsl --install)
 
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -468,7 +468,7 @@ curl -s -T <(echo "Texto de prueba") http://localhost:9998/tika \
 ### A.4 Configuración del cliente MinIO
 
 ```bash
-mc alias set lab1 http://localhost:9000 lab1admin 'Lopdp2025!Secure'
+mc alias set lab1 http://localhost:9000 lab1admin 'Lopdp2026'
 mc admin info lab1
 mc ls lab1
 ```
