@@ -468,7 +468,7 @@ curl -s -T <(echo "Texto de prueba") http://localhost:9998/tika \
 ### A.4 Configuración del cliente MinIO
 
 ```bash
-mc alias set lab1 http://localhost:9000 lab1admin 'Lopdp2025!Secure'
+mc alias set lab1 http://localhost:9000 lab1admin 'Lopdp2026'
 mc admin info lab1
 mc ls lab1
 ```
