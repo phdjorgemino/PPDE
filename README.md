@@ -166,7 +166,7 @@ Al final del laboratorio, el estudiante debe poder demostrar:
 - Disco: 40 GB libres en SSD.
 - GPU opcional: cualquier NVIDIA con ≥ 6 GB VRAM y CUDA 12 reduce el tiempo del módulo F de ~3 h a ~25 min.
 
-### 4.2 Software base (Ubuntu 22.04 / 24.04 LTS)
+### 4.2 Software base (Ubuntu 22.04 / 24.04 LTS) (wsl --install)
 
 ```bash
 sudo apt update && sudo apt upgrade -y
