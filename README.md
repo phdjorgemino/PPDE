@@ -169,15 +169,20 @@ Al final del laboratorio, el estudiante debe poder demostrar:
 ### 4.2 Software base (Ubuntu 22.04 / 24.04 LTS) (wls --install)
 Instalar docker desde windows 
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl wget git build-essential ca-certificates \
-    python3 python3-pip python3-venv python3-dev \
-    jq tree htop net-tools openssh-client
+#sudo apt update && sudo apt upgrade -y
+#sudo apt install -y curl wget git build-essential ca-certificates \
+  #  python3 python3-pip python3-venv python3-dev \
+  #  jq tree htop net-tools openssh-client
+
+apt update && apt upgrade -y
+apt install -y curl wget git build-essential ca-certificates \
+    jq tree htop net-tools openssh-client \
+    libmagic1 libmagic-dev
 
 # Docker Engine + Compose v2
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
-newgrp docker   # o cerrar sesión y reabrir
+#newgrp docker   # o cerrar sesión y reabrir
 
 # Verificación
 docker --version           # ≥ 24.0.0
@@ -188,7 +193,8 @@ python3 --version          # ≥ 3.10
 ### 4.3 Entorno Python aislado
 
 ```bash
-# =========================
+La parte que cambias es todo el bloque de código de la §4.3: desde la línea 190 (donde abre ```bash) hasta la 302 (donde cierra ```). Reemplaza esas 113 líneas por este bloque corregido (Python 3.10 vía uv + torch CPU-only):
+bash# =========================
 # 0. Crear y entrar al proyecto
 # =========================
 
@@ -198,26 +204,26 @@ cd ~/lab1
 
 # =========================
 # 1. Dependencias del sistema
+#    (NO instalamos el python3 del sistema: usamos Python 3.10 vía uv)
 # =========================
 
 apt update
-
 apt install -y \
-  python3 \
-  python3-venv \
-  python3-pip \
-  python-is-python3 \
   build-essential \
   libmagic1 \
   libmagic-dev
 
 
 # =========================
-# 2. Crear entorno virtual
+# 2. Crear entorno virtual con Python 3.10 (uv)
 # =========================
 
-python3 -m venv .venv
+source $HOME/.local/bin/env          # carga uv en esta sesión
+uv python install 3.10               # baja un Python 3.10 aislado de Ubuntu
+rm -rf .venv
+uv venv --python 3.10 --seed .venv
 source .venv/bin/activate
+python --version                     # debe decir: Python 3.10.x
 
 
 # =========================
@@ -228,7 +234,7 @@ python -m pip install --upgrade pip setuptools wheel
 
 
 # =========================
-# 4. Crear requirements.txt
+# 4. Crear requirements.txt  (SIN torch: se instala aparte en CPU)
 # =========================
 
 cat > requirements.txt <<'EOF'
@@ -236,7 +242,6 @@ presidio-analyzer==2.2.355
 presidio-anonymizer==2.2.355
 spacy==3.7.5
 opacus==1.5.2
-torch==2.4.0
 transformers==4.44.2
 datasets==2.21.0
 scikit-learn==1.5.1
@@ -254,8 +259,10 @@ EOF
 
 # =========================
 # 5. Instalar dependencias Python
+#    torch CPU-only PRIMERO (evita ~3-4 GB de libs CUDA y el "No space left on device")
 # =========================
 
+python -m pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r requirements.txt
 
 
@@ -321,7 +328,7 @@ mc --version
 ```
 
 ### 4.6 Cliente Vault
-
+apt install -y unzip
 ```bash
 curl -sLO https://releases.hashicorp.com/vault/1.17.3/vault_1.17.3_linux_amd64.zip
 unzip vault_1.17.3_linux_amd64.zip && sudo install -m 0755 vault /usr/local/bin/
@@ -337,6 +344,9 @@ vault --version
 ```bash
 cd ~/lab1
 mkdir -p {data/raw,data/sanitized,data/corpus,recognizers,scripts,models,keys,logs,reports}
+
+## instalar tree
+apt install -y tree
 tree -L 2
 ```
 
