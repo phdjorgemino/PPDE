@@ -108,7 +108,7 @@ Al final del laboratorio, el estudiante debe poder demostrar:
                     └──────────▲──────────┘
                                │ modelos + corpus sanitizado
             ┌──────────────────┴──────────────────┐
-            │     PIPELINE DE PRIVACIDAD MSP      │
+            │     PIPELINE DE PRIVACIDAD ES      │
             │     (Sistema bajo diseño)           │
             └──────────────────▲──────────────────┘
                                │ documentos raw
@@ -531,7 +531,7 @@ MinIO ofrece dos modos de retención:
 | **GOVERNANCE** | Usuarios con el permiso `s3:BypassGovernanceRetention` pueden eliminar antes del vencimiento. | Cumplimiento ordinario con excepciones controladas (corrección de error operacional autorizada por el DPO). |
 | **COMPLIANCE** | Nadie, ni el root, puede eliminar hasta el vencimiento. Inmutabilidad absoluta. | Evidencia forense bajo cadena de custodia judicial. |
 
-Para el laboratorio se selecciona **GOVERNANCE** porque el **Art. 12 de la LOPDP** consagra el derecho de supresión ("derecho al olvido"): el responsable del tratamiento debe poder eliminar datos de un titular que ejerza ese derecho. COMPLIANCE entraría en conflicto directo con esa obligación legal y bloquearía al MSP frente a una solicitud legítima de un paciente. Se prioriza el cumplimiento sustantivo (Art. 12) sobre la inmutabilidad técnica absoluta, conservando la protección contra borrado accidental o malicioso vía RBAC sobre el permiso `BypassGovernanceRetention`.
+Para el laboratorio se selecciona **GOVERNANCE** porque el **Art. 12 de la LOPDP** consagra el derecho de supresión ("derecho al olvido"): el responsable del tratamiento debe poder eliminar datos de un titular que ejerza ese derecho. COMPLIANCE entraría en conflicto directo con esa obligación legal y bloquearía al EP frente a una solicitud legítima de un paciente. Se prioriza el cumplimiento sustantivo (Art. 12) sobre la inmutabilidad técnica absoluta, conservando la protección contra borrado accidental o malicioso vía RBAC sobre el permiso `BypassGovernanceRetention`.
 
 #### A.4.4 Verificación funcional de la inmutabilidad
 
@@ -567,10 +567,10 @@ mc ls --versions lab1/sanitized-corpus/test-lock.txt
 # Borrar TODAS las versiones (delete markers y objetos sin retención)
 # --bypass-governance cubre el caso de versiones que sí quedaron bajo WORM
 mc ls --versions --json lab1/sanitized-corpus/test-lock.txt 2>/dev/null \
-  | jq -r '.versionId' \
-  | while read V; do
+  | jq -r 'select(.versionId != null and .versionId != "") | .versionId' \
+  | while read -r V; do
       echo "Eliminando versión: $V"
-      mc rm --version-id "$V" --bypass-governance \
+      mc rm --version-id "$V" --bypass \
         lab1/sanitized-corpus/test-lock.txt 2>&1
     done
 
@@ -779,17 +779,29 @@ vault token create -policy=age-reader -ttl=24h -display-name=data-scientist
 Guarda el token emitido — se usará en el Módulo G.
 
 ### A.6 Checkpoint del Módulo A
+En caso que se les salga del venv
+cd ~/lab1
+source .venv/bin/activate
 
-Verifica con `~/lab1/scripts/check_a.sh`:
+
+Crear archivo con `~/lab1/scripts/check_a.sh`:
 
 ```bash
 #!/usr/bin/env bash
 set -e
+cd ~/lab1
 echo "== Checkpoint Módulo A =="
-docker compose ps --format json | jq -r '.[] | "\(.Service)\t\(.State)"'
+echo
+echo "== Docker Compose =="
+docker compose ps --format json | jq -r '"\(.Service // .Name)\t\(.State // .Status)"'
+echo
 mc ls lab1 | grep -q raw-corpus && echo "✓ bucket raw-corpus"
 mc ls lab1 | grep -q sanitized-corpus && echo "✓ bucket sanitized-corpus"
+echo
+export VAULT_ADDR=http://localhost:8200
+export VAULT_TOKEN=root-token-lab1
 vault read transit/keys/lab1-corpus-master >/dev/null && echo "✓ transit key creada"
+echo
 echo "Módulo A: OK"
 ```
 
@@ -877,7 +889,7 @@ def documento_clinico(categoria, idx):
     texto = f"""Entidad de Salud
 {hospital}
 
-OFICIO DE REFERENCIA No. MSP-{categoria.upper()}-{idx:06d}
+OFICIO DE REFERENCIA No. ES-{categoria.upper()}-{idx:06d}
 Fecha: {fecha.strftime('%d de %B de %Y').lower()}
 
 DATOS DEL PACIENTE
@@ -903,7 +915,7 @@ MEDICACIÓN ACTUAL
 - Control de signos vitales
 
 Médico tratante: {medico}
-Código MSP: {random.randint(100000,999999)}
+Código ES: {random.randint(100000,999999)}
 
 Firma electrónica: [hash documento]
 """
@@ -1067,16 +1079,27 @@ Crea `~/lab1/recognizers/ec_ruc.py`:
 
 ```python
 """
-RUC ecuatoriano: 13 dígitos. Los 10 primeros son la cédula del titular
-(persona natural) o un identificador especial (jurídica/pública); los 3
-últimos son secuencial de establecimiento (001, 002, ...).
+Recognizer de RUC ecuatoriano.
+
+Casos cubiertos:
+- Persona natural: 13 dígitos, primeros 10 = cédula válida, últimos 3 = establecimiento.
+- Sociedad privada: tercer dígito 9, validación módulo 11.
+- Entidad pública: tercer dígito 6, validación módulo 11.
 """
+
 from presidio_analyzer import PatternRecognizer, Pattern
+
+try:
+    from ec_cedula import EcuadorCedulaRecognizer
+except ImportError:
+    from .ec_cedula import EcuadorCedulaRecognizer
+
 
 class EcuadorRucRecognizer(PatternRecognizer):
     PATTERNS = [
         Pattern(name="ec_ruc", regex=r"\b\d{13}\b", score=0.45),
     ]
+
     CONTEXT = ["ruc", "registro único", "contribuyente", "sri"]
 
     def __init__(self):
@@ -1087,14 +1110,61 @@ class EcuadorRucRecognizer(PatternRecognizer):
             supported_language="es",
         )
 
+    @staticmethod
+    def _provincia_ok(ruc: str) -> bool:
+        provincia = int(ruc[:2])
+        return (1 <= provincia <= 24) or provincia == 30
+
+    @staticmethod
+    def _establecimiento_ok(ruc: str) -> bool:
+        return int(ruc[-3:]) >= 1
+
+    @staticmethod
+    def _mod11_check(digits: str, coef: list[int]) -> int:
+        total = sum(int(d) * c for d, c in zip(digits, coef))
+        mod = total % 11
+        check = 0 if mod == 0 else 11 - mod
+        return check
+
     def validate_result(self, pattern_text: str) -> bool:
-        if len(pattern_text) != 13 or not pattern_text.isdigit():
+        ruc = pattern_text
+
+        if len(ruc) != 13 or not ruc.isdigit():
             return False
-        if not pattern_text.endswith("001") and pattern_text[-3:].lstrip("0") == "":
+
+        if not self._provincia_ok(ruc):
             return False
-        tercer = int(pattern_text[2])
-        # Tipos válidos: 0-5 natural, 6 pública, 9 jurídica
-        return tercer in {0,1,2,3,4,5,6,9}
+
+        if not self._establecimiento_ok(ruc):
+            return False
+
+        tercer = int(ruc[2])
+
+        # Persona natural: primeros 10 dígitos deben ser una cédula válida
+        if 0 <= tercer <= 5:
+            return EcuadorCedulaRecognizer._checksum_ok(ruc[:10])
+
+        # Sociedad privada: tercer dígito 9, dígito verificador en posición 10
+        if tercer == 9:
+            coef = [4, 3, 2, 7, 6, 5, 4, 3, 2]
+            check = self._mod11_check(ruc[:9], coef)
+
+            if check == 10:
+                return False
+
+            return check == int(ruc[9])
+
+        # Entidad pública: tercer dígito 6, dígito verificador en posición 9
+        if tercer == 6:
+            coef = [3, 2, 7, 6, 5, 4, 3, 2]
+            check = self._mod11_check(ruc[:8], coef)
+
+            if check == 10:
+                return False
+
+            return check == int(ruc[8])
+
+        return False
 ```
 
 ### D.3 Recognizer de teléfono ecuatoriano
@@ -1551,7 +1621,7 @@ mc retention info lab1/sanitized-corpus/oficio_0000_cardiologia.txt
 mc ls lab1/sanitized-corpus/ | wc -l
 ```
 
-La aplicación de retención por objeto debe formar parte permanente del pipeline de ingesta del MSP. En un entorno de producción se delegaría a un *event handler* que escucha eventos `s3:ObjectCreated` en MinIO Notify y aplica la retención automáticamente.
+La aplicación de retención por objeto debe formar parte permanente del pipeline de ingesta del ES. En un entorno de producción se delegaría a un *event handler* que escucha eventos `s3:ObjectCreated` en MinIO Notify y aplica la retención automáticamente.
 
 ---
 
@@ -2126,14 +2196,16 @@ Crea `~/lab1/scripts/train_baseline.py`:
 ```python
 #!/usr/bin/env python3
 """
-Entrenamiento de clasificador BERT-Spanish sobre corpus sanitizado.
+Entrenamiento baseline NO privado.
 
-Versión SIN PrivacyEngine / SIN Opacus.
+Este script replica train_dp.py, pero elimina:
+- PrivacyEngine
+- make_private_with_epsilon
+- accountant RDP
+- ruido gaussiano DP
+- certificación epsilon/delta
 
-IMPORTANTE:
-- Este script NO certifica privacidad diferencial formal.
-- Mantiene batch lógico mediante acumulación de gradientes.
-- Aplica clipping global de gradientes, pero esto NO equivale a DP-SGD formal.
+Sirve para comparar la utilidad del modelo no privado contra el modelo DP.
 """
 
 import json
@@ -2146,22 +2218,28 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 
+# =========================
+# Configuración general
+# =========================
+
 BASE = Path(__file__).parent.parent
 
 MODEL_NAME = "dccuchile/bert-base-spanish-wwm-cased"
 MAX_LEN = 256
 
-# Batch físico: tamaño real que entra en la GPU
+# Batch físico: tamaño real que entra en CPU/GPU
 BATCH = 8
 
-# Batch lógico: tamaño efectivo mediante acumulación
+# Batch lógico: se simula con acumulación de gradientes
 LOGICAL_BATCH = 64
 
 EPOCHS = 3
 LR = 5e-5
 
-# Clipping global de gradientes
+# Clipping global de gradientes.
+# No es DP-SGD formal; solo ayuda a estabilizar el entrenamiento.
 MAX_GRAD_NORM = 1.0
+
 
 if LOGICAL_BATCH < BATCH:
     raise ValueError("LOGICAL_BATCH debe ser mayor o igual que BATCH.")
@@ -2171,11 +2249,16 @@ if LOGICAL_BATCH % BATCH != 0:
 
 GRAD_ACCUM_STEPS = LOGICAL_BATCH // BATCH
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 print(f"Device: {device}")
+print(f"Modelo: {MODEL_NAME}")
 print(f"Batch físico: {BATCH}")
 print(f"Batch lógico: {LOGICAL_BATCH}")
 print(f"Pasos de acumulación: {GRAD_ACCUM_STEPS}")
+print("PrivacyEngine: DESACTIVADO")
+print("Privacidad diferencial formal: NO certificada")
 
 
 # =========================
@@ -2191,7 +2274,7 @@ label_map_path = BASE / "data" / "label_map.json"
 
 if not label_map_path.exists():
     raise FileNotFoundError(
-        f"No existe {label_map_path}. Debes generar label_map.json antes de entrenar."
+        f"No existe {label_map_path}. Ejecuta primero: python scripts/prepare_dataset.py"
     )
 
 label_map = json.loads(label_map_path.read_text(encoding="utf-8"))
@@ -2210,7 +2293,10 @@ class ClinicalDataset(Dataset):
         parquet_path = Path(parquet_path)
 
         if not parquet_path.exists():
-            raise FileNotFoundError(f"No existe el archivo: {parquet_path}")
+            raise FileNotFoundError(
+                f"No existe el archivo: {parquet_path}. "
+                "Ejecuta primero: python scripts/prepare_dataset.py"
+            )
 
         self.df = pd.read_parquet(parquet_path).reset_index(drop=True)
 
@@ -2244,7 +2330,7 @@ class ClinicalDataset(Dataset):
         else:
             token_type_ids = torch.zeros(MAX_LEN, dtype=torch.long)
 
-        # Se mantiene para compatibilidad con tu versión anterior.
+        # Se conserva para mantener compatibilidad con train_dp.py.
         position_ids = torch.arange(MAX_LEN, dtype=torch.long)
 
         return {
@@ -2263,6 +2349,7 @@ print(f"Train samples: {len(train_ds)}")
 print(f"Test samples:  {len(test_ds)}")
 
 
+# En baseline usamos BATCH físico y acumulamos gradientes hasta LOGICAL_BATCH.
 train_loader = DataLoader(
     train_ds,
     batch_size=BATCH,
@@ -2273,8 +2360,7 @@ train_loader = DataLoader(
 test_loader = DataLoader(
     test_ds,
     batch_size=BATCH,
-    shuffle=False,
-    drop_last=False
+    shuffle=False
 )
 
 
@@ -2370,7 +2456,7 @@ for epoch in range(EPOCHS):
             labels=y
         )
 
-        # Se divide la pérdida para que la acumulación simule un batch lógico.
+        # División para que la acumulación simule un batch lógico.
         loss = out.loss / GRAD_ACCUM_STEPS
         loss.backward()
 
@@ -2413,11 +2499,13 @@ for epoch in range(EPOCHS):
 # =========================
 
 elapsed = (time.time() - start) / 60
+final_acc = evaluate(test_loader)
 
 print(f"Tiempo total: {elapsed:.1f} min")
-print("Privacidad diferencial formal: NO certificada en esta versión.")
-print("PrivacyEngine: desactivado.")
-print("Opacus: no utilizado.")
+print(f"Accuracy final test: {final_acc:.4f}")
+print("Privacidad diferencial formal: NO certificada")
+print("PrivacyEngine: desactivado")
+print("Opacus: no utilizado")
 
 
 # =========================
@@ -2495,7 +2583,7 @@ vault kv put secret/lab1/age-master \
     public_key="$PUB" \
     created_at="$(date -u +%FT%TZ)" \
     classification="restricted" \
-    owner="data-protection-officer@msp.gob.ec"
+    owner="data-protection-officer@es.gob.ec"
 
 vault kv get secret/lab1/age-master
 ```
@@ -2659,13 +2747,13 @@ from datetime import datetime, timezone
 
 BASE = Path(__file__).parent.parent
 out = {
-  "registro_id": "RAT-MSP-LAB1-2025-001",
+  "registro_id": "RAT-ES-LAB1-2025-001",
   "version": "1.0",
   "fecha_emision": datetime.now(timezone.utc).isoformat(),
   "responsable_tratamiento": {
     "denominacion": "Entidad de Salud",
     "identificador_fiscal": "1768145480001",
-    "delegado_proteccion_datos": "dpo@msp.gob.ec"
+    "delegado_proteccion_datos": "dpo@es.gob.ec"
   },
   "finalidades": [
     "Clasificación automática de oficios clínicos para enrutamiento administrativo",
