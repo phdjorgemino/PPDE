@@ -588,6 +588,7 @@ Si algún `mc rm` de la limpieza reporta `Object is WORM protected` y **falla** 
 **Paso 1 — Verificar versiones de los componentes.** Algunas versiones antiguas de `mc` tienen regresiones en Object Lock.
 
 ```bash
+
 mc --version                                       # mínimo: RELEASE.2024-*
 docker exec lab1-minio minio --version             # versión del servidor
 mc version info lab1/sanitized-corpus              # debe decir: versioning is enabled
@@ -613,7 +614,7 @@ Inspecciona la salida — el campo clave es `isDeleteMarker`. El filtro correcto
 
 ```bash
 VID=$(mc ls --versions --json lab1/sanitized-corpus/test-lock.txt \
-      | jq -r 'select(.isDeleteMarker==false) | .versionId' | head -1)
+      | jq -r 'select(.isDeleteMarker != true) | .versionId' | head -1)
 echo "VID = '$VID'"
 ```
 
@@ -621,8 +622,14 @@ Si `$VID` está vacío o vale `null`, no continúes:
 
 ```bash
 if [ -z "$VID" ] || [ "$VID" = "null" ]; then
-    echo "⚠ VID vacío — no ejecutes el Paso 4"
-    echo "  Verifica: mc ls --versions lab1/sanitized-corpus/test-lock.txt"
+    echo "⚠ VID vacío — diagnóstico automático:"
+    command -v jq >/dev/null \
+        || echo "  ✗ jq NO está instalado        ->  apt install -y jq"
+    mc version info lab1/sanitized-corpus 2>/dev/null | grep -q "versioning is enabled" \
+        || echo "  ✗ bucket SIN Object Lock       ->  recrear con A.4.5 (mc mb --with-lock)"
+    mc ls lab1/sanitized-corpus/test-lock.txt >/dev/null 2>&1 \
+        || echo "  ✗ el objeto NO se subió        ->  revisa 'mc ls lab1' y repite el Paso 2"
+    echo "  No ejecutes el Paso 4 hasta resolver lo marcado con ✗."
 else
     echo "✓ VID válido: $VID"
 fi
@@ -692,7 +699,9 @@ El último comando muestra la versión `PUT` original (bajo WORM) y el nuevo del
 DEL_VID=$(mc ls --versions --json lab1/sanitized-corpus/test-lock.txt \
           | jq -r 'select(.isDeleteMarker==true) | .versionId' \
           | head -1)
+
 mc rm --version-id "$DEL_VID" lab1/sanitized-corpus/test-lock.txt
+
 mc ls lab1/sanitized-corpus/ | grep test-lock   # vuelve a ser visible
 ```
 
@@ -735,7 +744,7 @@ mc retention set --default GOVERNANCE 30d lab1/sanitized-corpus
 mc cp --recursive ~/lab1/backup_sanitized/ lab1/sanitized-corpus/ 2>/dev/null || true
 ```
 
-Este es un error operacional común y debe documentarse en el informe técnico como hallazgo del estudiante.
+Este es un error operacional común y debe documentarse.
 
 ### A.5 Configuración inicial de Vault
 
