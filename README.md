@@ -461,6 +461,8 @@ curl -s http://localhost:9000/minio/health/live && echo "MinIO OK"
 export VAULT_ADDR=http://localhost:8200
 export VAULT_TOKEN=root-token-lab1
 vault status
+## hay que instalar jq
+apt install -y jq
 
 # Presidio Analyzer
 curl -s -X POST http://localhost:5001/analyze \
@@ -522,7 +524,7 @@ Default retention until : 30d
 
 #### A.4.3 Decisión arquitectónica: GOVERNANCE vs COMPLIANCE
 
-MinIO ofrece dos modos de retención. El estudiante debe poder defender oralmente la elección:
+MinIO ofrece dos modos de retención:
 
 | Modo | Comportamiento | Caso de uso |
 |------|----------------|-------------|
@@ -611,8 +613,7 @@ Inspecciona la salida — el campo clave es `isDeleteMarker`. El filtro correcto
 
 ```bash
 VID=$(mc ls --versions --json lab1/sanitized-corpus/test-lock.txt \
-      | jq -r 'select(.isDeleteMarker==false) | .versionId' \
-      | head -1)
+      | jq -r 'select(.isDeleteMarker==false) | .versionId' | head -1)
 echo "VID = '$VID'"
 ```
 
